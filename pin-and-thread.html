@@ -1,0 +1,687 @@
+<title>Pin &amp; Thread</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bagel+Fat+One&family=Figtree:wght@400;600;700&display=swap">
+<style>
+/* Layout: one-screen app — brand + level stepper, a status line, the cork board filling the rest, controls underneath */
+:root {
+  --bg: #e2e7df;
+  --fg: #1c2729;
+  --muted: #586765;
+  --panel: #f4f6f1;
+  --edge: #c5cec4;
+  --frame: #263b4c;
+  --stitch: #efe3c6;
+  --alert: #c8392f;
+  --btn: #1c2729;
+  --btn-fg: #f4f6f1;
+  --cork-dim: 0;
+  --font-display: "Bagel Fat One", "Arial Rounded MT Bold", "Trebuchet MS", system-ui, sans-serif;
+  --font-body: "Figtree", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #12181a; --fg: #e4eae5; --muted: #93a29f; --panel: #1c2427; --edge: #2c383b;
+    --frame: #2e475b; --stitch: #e8dcc0; --alert: #ef6b5f; --btn: #e4eae5; --btn-fg: #12181a;
+    --cork-dim: 0.22; color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #12181a; --fg: #e4eae5; --muted: #93a29f; --panel: #1c2427; --edge: #2c383b;
+  --frame: #2e475b; --stitch: #e8dcc0; --alert: #ef6b5f; --btn: #e4eae5; --btn-fg: #12181a;
+  --cork-dim: 0.22; color-scheme: dark;
+}
+html, body { height: 100%; }
+[hidden] { display: none !important; }
+body {
+  background: var(--bg); color: var(--fg);
+  font-family: var(--font-body); font-size: 15px; line-height: 1.4;
+  overflow: hidden; -webkit-user-select: none; user-select: none;
+}
+.app {
+  box-sizing: border-box; height: 100%; max-width: 680px; margin: 0 auto;
+  display: flex; flex-direction: column; gap: 10px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px));
+  padding-right: max(16px, env(safe-area-inset-right, 0px));
+  padding-block: 14px;
+}
+.top { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.brand {
+  margin: 0; font-family: var(--font-display); font-weight: 400;
+  font-size: clamp(24px, 6vw, 32px); line-height: 1; letter-spacing: 0.01em;
+}
+.brand span { color: var(--alert); }
+.lvl { display: flex; align-items: center; gap: 6px; }
+.lvl-label { display: grid; justify-items: center; min-width: 58px; }
+.lvl-label small { font-size: 10px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--muted); font-weight: 700; }
+.lvl-label b { font-family: var(--font-display); font-weight: 400; font-size: 24px; line-height: 1; font-variant-numeric: tabular-nums; }
+button {
+  font: inherit; color: inherit; cursor: pointer; border: 1px solid var(--edge);
+  background: var(--panel); border-radius: 10px; padding: 9px 14px; font-weight: 600;
+}
+button:hover:not(:disabled) { border-color: var(--muted); }
+button:focus-visible { outline: 3px solid var(--alert); outline-offset: 2px; }
+button:disabled { opacity: 0.35; cursor: default; }
+button.icon { width: 38px; height: 38px; padding: 0; font-size: 22px; line-height: 1; display: grid; place-items: center; }
+.status { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 2.8em; }
+.status p { margin: 0; color: var(--muted); min-width: 0; text-wrap: pretty; }
+.count {
+  flex: none; font-weight: 700; font-variant-numeric: tabular-nums; font-size: 13px;
+  border: 1px solid var(--edge); background: var(--panel); border-radius: 999px; padding: 4px 10px;
+}
+.count.full { background: var(--btn); color: var(--btn-fg); border-color: var(--btn); }
+.stage { position: relative; flex: 1; min-height: 0; display: grid; place-items: center; }
+canvas { display: block; touch-action: none; max-width: 100%; }
+.controls { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+.win { position: absolute; inset: 0; display: grid; place-items: center; }
+.card {
+  background: var(--panel); border: 1px solid var(--edge); border-radius: 18px;
+  padding: 22px 26px; text-align: center; display: grid; gap: 8px; justify-items: center;
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.28);
+  animation: pop 0.35s cubic-bezier(.2, 1.4, .4, 1);
+}
+.card h2 { margin: 0; font-family: var(--font-display); font-weight: 400; font-size: 34px; line-height: 1.05; }
+.card p { margin: 0 0 6px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.card button.primary { background: var(--btn); color: var(--btn-fg); border-color: var(--btn); padding: 11px 22px; }
+@keyframes pop { from { transform: scale(0.85); opacity: 0; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) { .card { animation: none; } }
+</style>
+
+<div class="app">
+  <header class="top">
+    <h1 class="brand">Pin <span>&amp;</span> Thread</h1>
+    <nav class="lvl" aria-label="Level">
+      <button id="prev" class="icon" aria-label="Previous level">‹</button>
+      <div class="lvl-label"><small>Level</small><b id="lvlNum">1</b></div>
+      <button id="next" class="icon" aria-label="Next level">›</button>
+    </nav>
+  </header>
+  <div class="status">
+    <p id="hint">Drag from a pin to the other pin of the same color.</p>
+    <span id="count" class="count">0 / 2</span>
+  </div>
+  <main class="stage" id="stage">
+    <canvas id="board" aria-label="Puzzle board"></canvas>
+    <div class="win" id="win" hidden>
+      <div class="card">
+        <h2>Untangled</h2>
+        <p id="winText">Level 1 · 0:12</p>
+        <button id="nextBtn" class="primary">Next level →</button>
+      </div>
+    </div>
+  </main>
+  <footer class="controls">
+    <button id="clear">Clear threads</button>
+    <button id="sound" aria-pressed="true">Sound on</button>
+  </footer>
+</div>
+
+<script>
+(() => {
+const $ = id => document.getElementById(id);
+const canvas = $('board'), ctx = canvas.getContext('2d');
+const C = 500, LW = 14, PEG_R = 38, RIM_INSET = 21, FRAME = 30, STEP = 5;
+
+const COLORS = [
+  { c: '#d9473d', g: 'dot',     ink: '#fff' },  // r
+  { c: '#2f6bd8', g: 'square',  ink: '#fff' },  // b
+  { c: '#2a9d5c', g: 'tri',     ink: '#fff' },  // g
+  { c: '#e8b321', g: 'diamond', ink: 'rgba(40,30,0,.6)' }, // y
+  { c: '#8b52cc', g: 'star',    ink: '#fff' },  // p
+  { c: '#ee7a26', g: 'plus',    ink: '#fff' },  // o
+  { c: '#17a3a8', g: 'ring',    ink: '#fff' },  // t
+  { c: '#e05a9a', g: 'hex',     ink: '#fff' },  // k
+];
+const KEY = 'rbgypotk';
+
+const HAND = [
+  { shape: 'circle', hint: 'Drag from a pin to the other pin of the same color.',
+    pegs: [['b','rim',300],['b','rim',60],['r','rim',250],['r','rim',110]] },
+  { shape: 'circle', hint: "Threads can't cross, but they can bend around pins. Tap a thread to remove it.",
+    pegs: [['r','rim',270],['r','rim',90],['b',0,-0.5],['b',0,0.5]] },
+  { shape: 'circle', hint: 'Rim pins never move. Decide which side of the green thread each pin should end up on.',
+    pegs: [['g','rim',0],['g','rim',180],['r','rim',270],['r',0.42,0.14],['b','rim',90],['b',-0.42,-0.14]] },
+  { shape: 'square', hint: 'A thread can sweep wide to fence in a pin.',
+    pegs: [['y','rim',330],['y','rim',30],['p','rim',210],['p','rim',150],['r',0,-0.45],['r','rim',180]] },
+  { shape: 'circle', hint: 'Some boards need an S-curve.',
+    pegs: [['r','rim',0],['r',0,0.42],['b','rim',180],['b',0,-0.42],['g','rim',270],['g','rim',90]] },
+];
+const TIPS = [
+  'Connect every pair. No crossings.',
+  'Start with the threads that run rim to rim. They split the board.',
+  'Drag back along a thread to rewind it.',
+  'Wooden posts block threads. Go around them.',
+  'A thread can wrap around a pin to move it to the other side.',
+];
+
+/* ---------- geometry ---------- */
+function makeShape(kind) {
+  if (kind === 'circle') {
+    const R = 440;
+    return { kind, r: R, depth: (x, y) => R - Math.hypot(x - C, y - C) };
+  }
+  let verts = [];
+  if (kind === 'square') { const h = 415; verts = [[C-h,C-h],[C+h,C-h],[C+h,C+h],[C-h,C+h]]; }
+  else { for (let i = 0; i < 6; i++) { const a = Math.PI / 3 * i; verts.push([C + 452 * Math.cos(a), C + 452 * Math.sin(a)]); } }
+  const edges = verts.map((v, i) => {
+    const w = verts[(i + 1) % verts.length];
+    const dx = w[0] - v[0], dy = w[1] - v[1], L = Math.hypot(dx, dy);
+    return { v, n: [-dy / L, dx / L] };
+  });
+  const depth = (x, y) => Math.min(...edges.map(e => (x - e.v[0]) * e.n[0] + (y - e.v[1]) * e.n[1]));
+  const r = Math.min(...edges.map(e => (C - e.v[0]) * e.n[0] + (C - e.v[1]) * e.n[1]));
+  return { kind, verts, edges, depth, r };
+}
+function rimPoint(shape, ang) {
+  const a = ang * Math.PI / 180, dx = Math.sin(a), dy = -Math.cos(a);
+  if (shape.kind === 'circle') { const d = shape.r - RIM_INSET; return { x: C + dx * d, y: C + dy * d }; }
+  let best = Infinity, bn = null;
+  for (const e of shape.edges) {
+    const dn = dx * e.n[0] + dy * e.n[1];
+    if (dn >= 0) continue;
+    const t = ((e.v[0] - C) * e.n[0] + (e.v[1] - C) * e.n[1]) / dn;
+    if (t > 0 && t < best) { best = t; bn = e.n; }
+  }
+  return { x: C + dx * best + bn[0] * RIM_INSET, y: C + dy * best + bn[1] * RIM_INSET };
+}
+function nudge(kind, a) {
+  if (kind === 'circle') return a;
+  const period = kind === 'square' ? 90 : 60, off = kind === 'square' ? 45 : 30;
+  let d = ((a - off) % period + period) % period;
+  if (d > period / 2) d -= period;
+  if (Math.abs(d) < 10) a += (d >= 0 ? 1 : -1) * (10 - Math.abs(d));
+  return a;
+}
+function pathShape(shape, o) {
+  ctx.beginPath();
+  if (shape.kind === 'circle') { ctx.arc(C, C, shape.r + o, 0, Math.PI * 2); return; }
+  const n = shape.edges.length, pts = [];
+  for (let i = 0; i < n; i++) {
+    const n1 = shape.edges[(i - 1 + n) % n].n, n2 = shape.edges[i].n, v = shape.edges[i].v;
+    const k = o / (1 + n1[0] * n2[0] + n1[1] * n2[1]);
+    pts.push([v[0] - (n1[0] + n2[0]) * k, v[1] - (n1[1] + n2[1]) * k]);
+  }
+  const rad = Math.max(4, 24 + o);
+  const m0 = [(pts[0][0] + pts[1][0]) / 2, (pts[0][1] + pts[1][1]) / 2];
+  ctx.moveTo(m0[0], m0[1]);
+  for (let i = 1; i <= n; i++) {
+    const p = pts[i % n], q = pts[(i + 1) % n];
+    ctx.arcTo(p[0], p[1], q[0], q[1], rad);
+  }
+  ctx.closePath();
+}
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+function segDist(p, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y, L2 = dx * dx + dy * dy;
+  let t = L2 ? ((p.x - a.x) * dx + (p.y - a.y) * dy) / L2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(p.x - a.x - t * dx, p.y - a.y - t * dy);
+}
+function segInter(a, b, c, d) {
+  const o = (p, q, r) => Math.sign((q.x - p.x) * (r.y - p.y) - (q.y - p.y) * (r.x - p.x));
+  return o(a, b, c) !== o(a, b, d) && o(c, d, a) !== o(c, d, b);
+}
+
+/* ---------- levels ---------- */
+function mulberry32(a) { return () => { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+function shuffle(arr, rng) { for (let i = arr.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [arr[i], arr[j]] = [arr[j], arr[i]]; } return arr; }
+
+function finalize(shape, pegs, pillars, hint) {
+  const groups = new Map();
+  pegs.forEach((p, i) => { if (!groups.has(p.pid)) groups.set(p.pid, []); groups.get(p.pid).push(i); });
+  const pairs = [];
+  for (const [, idx] of groups) {
+    const pi = pairs.length;
+    pairs.push({ c: pegs[idx[0]].c, a: idx[0], b: idx[1] });
+    pegs[idx[0]].pair = pi; pegs[idx[1]].pair = pi;
+  }
+  return { shape, pegs, pillars, pairs, hint };
+}
+function buildHand(def) {
+  const shape = makeShape(def.shape);
+  const pegs = def.pegs.map(([k, a, b]) => {
+    const c = KEY.indexOf(k);
+    const pt = a === 'rim' ? rimPoint(shape, b) : { x: C + a * shape.r, y: C + b * shape.r };
+    return { x: pt.x, y: pt.y, c, pid: c, rim: a === 'rim' };
+  });
+  return finalize(shape, pegs, [], def.hint);
+}
+function interleaved(t) {
+  const pos = {};
+  t.forEach((id, i) => { (pos[id] = pos[id] || []).push(i); });
+  const prs = Object.values(pos).filter(p => p.length === 2);
+  for (let i = 0; i < prs.length; i++) for (let j = i + 1; j < prs.length; j++) {
+    const [a1, b1] = prs[i], [a2, b2] = prs[j];
+    if ((a1 < a2 && a2 < b1 && b1 < b2) || (a2 < a1 && a1 < b2 && b2 < b1)) return true;
+  }
+  return false;
+}
+function tryGen(rng, shape, P, n) {
+  const ri = k => Math.floor(rng() * k);
+  const a = 1 + ri(Math.min(3, P - 1));
+  const b = ri(P - a + 1);
+  const m = 2 * a + b;
+  let tokens = null;
+  for (let k = 0; k < 200 && !tokens; k++) {
+    const t = [];
+    for (let i = 0; i < a; i++) t.push(i, i);
+    for (let i = 0; i < b; i++) t.push(a + i);
+    shuffle(t, rng);
+    if (!interleaved(t)) tokens = t;
+  }
+  if (!tokens) return null;
+  const colors = shuffle([0,1,2,3,4,5,6,7], rng).slice(0, P);
+  const off = rng() * 360, sp = 360 / m, pegs = [];
+  tokens.forEach((pid, i) => {
+    const pt = rimPoint(shape, nudge(shape.kind, off + i * sp + (rng() - 0.5) * sp * 0.4));
+    pegs.push({ x: pt.x, y: pt.y, c: colors[pid], pid, rim: true });
+  });
+  for (let i = 0; i < pegs.length; i++) for (let j = i + 1; j < pegs.length; j++)
+    if (dist(pegs[i], pegs[j]) < 2 * PEG_R + 34) return null;
+  const pillars = [];
+  const np = n >= 8 ? ri(n >= 14 ? 3 : 2) : 0;
+  for (let k = 0; k < np; k++) {
+    for (let tries = 0; tries < 100; tries++) {
+      const r = 30 + rng() * 16;
+      const x = C + (rng() * 2 - 1) * shape.r * 0.6, y = C + (rng() * 2 - 1) * shape.r * 0.6;
+      if (shape.depth(x, y) < r + 90) continue;
+      if (pillars.some(q => Math.hypot(q.x - x, q.y - y) < q.r + r + 110)) continue;
+      if (pegs.some(p => Math.hypot(p.x - x, p.y - y) < r + PEG_R + 80)) continue;
+      pillars.push({ x, y, r }); break;
+    }
+  }
+  const need = [];
+  for (let i = a; i < a + b; i++) need.push(i);
+  for (let i = a + b; i < P; i++) need.push(i, i);
+  for (const pid of need) {
+    let ok = false;
+    for (let tries = 0; tries < 400 && !ok; tries++) {
+      const x = C + (rng() * 2 - 1) * shape.r * 0.8, y = C + (rng() * 2 - 1) * shape.r * 0.8;
+      if (shape.depth(x, y) < PEG_R + 70) continue;
+      if (pegs.some(p => Math.hypot(p.x - x, p.y - y) < 140)) continue;
+      if (pillars.some(q => Math.hypot(q.x - x, q.y - y) < q.r + PEG_R + 75)) continue;
+      pegs.push({ x, y, c: colors[pid], pid, rim: false }); ok = true;
+    }
+    if (!ok) return null;
+  }
+  return finalize(shape, pegs, pillars, '');
+}
+function conflicts(L) {
+  let s = 0;
+  const segs = L.pairs.map(p => [L.pegs[p.a], L.pegs[p.b]]);
+  for (let i = 0; i < segs.length; i++) {
+    for (let j = i + 1; j < segs.length; j++) if (segInter(...segs[i], ...segs[j])) s++;
+    L.pegs.forEach((p, k) => { if (p.pair !== i && segDist(p, ...segs[i]) < PEG_R + LW) s++; });
+    L.pillars.forEach(q => { if (segDist(q, ...segs[i]) < q.r + LW) s++; });
+  }
+  return s;
+}
+function genLevel(n) {
+  const rng = mulberry32(n * 7919 + 13);
+  const shape = makeShape(['circle', 'square', 'hex'][n % 3]);
+  const P = Math.min(7, 3 + Math.floor((n - 5) / 3));
+  const want = Math.min(2 + Math.floor(n / 4), 7);
+  let best = null, bs = -1;
+  for (let t = 0; t < 80; t++) {
+    const L = tryGen(rng, shape, P, n);
+    if (!L) continue;
+    const s = conflicts(L);
+    if (s > bs) { bs = s; best = L; }
+    if (s >= want) break;
+  }
+  if (!best) best = buildHand(HAND[n % HAND.length]);
+  best.hint = best.pillars.length && n < 12 ? TIPS[3] : TIPS[n % TIPS.length === 3 ? 0 : n % TIPS.length];
+  return best;
+}
+const getLevel = n => n <= HAND.length ? buildHand(HAND[n - 1]) : genLevel(n);
+
+/* ---------- state ---------- */
+const store = {
+  get() { try { return JSON.parse(localStorage.getItem('pinthread.v1')) || {}; } catch { return {}; } },
+  set(v) { try { localStorage.setItem('pinthread.v1', JSON.stringify(v)); } catch {} },
+};
+let saved = store.get();
+let maxLevel = saved.max || 1;
+let level = 1, L = null, paths = [], drag = null, retract = null, won = false, t0 = 0;
+let soundOn = saved.sound !== false;
+let pulse = 0, dirty = true;
+
+function load(n) {
+  level = Math.max(1, n);
+  L = getLevel(level);
+  paths = L.pairs.map(() => null);
+  drag = null; retract = null; won = false; t0 = performance.now();
+  $('win').hidden = true;
+  $('lvlNum').textContent = level;
+  $('hint').textContent = L.hint;
+  $('prev').disabled = level <= 1;
+  $('next').disabled = level >= maxLevel;
+  store.set({ level, max: maxLevel, sound: soundOn });
+  updateCount();
+  dirty = true;
+}
+function updateCount() {
+  const done = paths.filter(p => p && p.done).length;
+  const el = $('count');
+  el.textContent = `${done} / ${L.pairs.length} threads`;
+  el.classList.toggle('full', done === L.pairs.length);
+}
+
+/* ---------- sound ---------- */
+let actx = null;
+function tone(freq, when = 0, dur = 0.35, vol = 0.12, type = 'triangle') {
+  if (!soundOn) return;
+  try {
+    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    const t = actx.currentTime + when, o = actx.createOscillator(), g = actx.createGain();
+    o.type = type; o.frequency.setValueAtTime(freq, t);
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g).connect(actx.destination); o.start(t); o.stop(t + dur);
+  } catch {}
+}
+const SCALE = [392, 440, 523.25, 587.33, 659.25, 784, 880, 1046.5];
+
+/* ---------- input ---------- */
+function toBoard(e) {
+  const r = canvas.getBoundingClientRect();
+  return { x: (e.clientX - r.left) / r.width * 1000, y: (e.clientY - r.top) / r.height * 1000 };
+}
+function pegAt(m) {
+  let best = -1, bd = PEG_R * 1.35;
+  L.pegs.forEach((p, i) => { const d = dist(p, m); if (d < bd) { bd = d; best = i; } });
+  return best;
+}
+function threadAt(m) {
+  for (let i = 0; i < paths.length; i++) {
+    const pts = paths[i] && paths[i].pts;
+    if (!pts) continue;
+    for (let k = 1; k < pts.length; k++) if (segDist(m, pts[k - 1], pts[k]) < LW * 1.3) return i;
+  }
+  return -1;
+}
+function blockedBy(pi, p) {
+  const pr = L.pairs[pi], s = L.pegs[pr.a], t = L.pegs[pr.b];
+  const nearOwn = dist(p, s) < PEG_R || dist(p, t) < PEG_R;
+  if (!nearOwn && L.shape.depth(p.x, p.y) < LW / 2 + 1) return 'wall';
+  for (let k = 0; k < L.pegs.length; k++) {
+    if (k === pr.a || k === pr.b) continue;
+    if (dist(p, L.pegs[k]) < PEG_R + LW / 2 + 1) return 'pin';
+  }
+  for (const q of L.pillars) if (dist(p, q) < q.r + LW / 2 + 1) return 'post';
+  for (let j = 0; j < paths.length; j++) {
+    if (j === pi || !paths[j]) continue;
+    const pts = paths[j].pts;
+    for (let k = 1; k < pts.length; k++) {
+      const a = pts[k - 1], b = pts[k];
+      if (Math.abs(p.x - a.x) > 40 && Math.abs(p.x - b.x) > 40) continue;
+      if (segDist(p, a, b) < LW + 2) return 'thread';
+    }
+  }
+  return null;
+}
+
+let downInfo = null;
+canvas.addEventListener('pointerdown', e => {
+  if (won || !L) return;
+  const m = toBoard(e);
+  const k = pegAt(m);
+  if (k >= 0) {
+    const pi = L.pegs[k].pair, pr = L.pairs[pi];
+    const target = pr.a === k ? pr.b : pr.a;
+    const pts = [{ x: L.pegs[k].x, y: L.pegs[k].y }];
+    paths[pi] = { pts, done: false };
+    drag = { pi, target, pts, blocked: null, ptr: m };
+    retract = null;
+    canvas.setPointerCapture(e.pointerId);
+    tone(SCALE[L.pairs[pi].c] / 2, 0, 0.12, 0.06);
+    updateCount();
+  } else {
+    downInfo = { m, pi: threadAt(m) };
+  }
+  dirty = true;
+});
+canvas.addEventListener('pointermove', e => {
+  if (!drag) return;
+  const m = toBoard(e);
+  drag.ptr = m;
+  const pts = drag.pts;
+  // rewind when the pointer comes back over the thread
+  for (let i = pts.length - 8; i >= 1; i--) {
+    if (dist(pts[i], m) < 11) { pts.length = i + 1; break; }
+  }
+  const tip = pts[pts.length - 1];
+  const d = dist(tip, m);
+  drag.blocked = null;
+  if (d < 2) { dirty = true; return; }
+  const steps = Math.ceil(d / STEP);
+  const tgt = L.pegs[drag.target];
+  for (let s = 1; s <= steps; s++) {
+    const p = { x: tip.x + (m.x - tip.x) * s / steps, y: tip.y + (m.y - tip.y) * s / steps };
+    const why = blockedBy(drag.pi, p);
+    if (why) { drag.blocked = why; break; }
+    if (dist(p, tgt) < PEG_R * 0.85) {
+      pts.push({ x: tgt.x, y: tgt.y });
+      complete();
+      return;
+    }
+    pts.push(p);
+  }
+  dirty = true;
+});
+function endDrag() {
+  if (drag) {
+    if (!paths[drag.pi].done) {
+      retract = { pts: drag.pts, c: L.pairs[drag.pi].c, start: performance.now() };
+      paths[drag.pi] = null;
+    }
+    drag = null; dirty = true;
+  }
+}
+canvas.addEventListener('pointerup', e => {
+  if (downInfo) {
+    const m = toBoard(e);
+    if (downInfo.pi >= 0 && dist(m, downInfo.m) < 12) {
+      paths[downInfo.pi] = null; tone(160, 0, 0.15, 0.08, 'sine'); updateCount();
+    }
+    downInfo = null; dirty = true;
+  }
+  endDrag();
+});
+canvas.addEventListener('pointercancel', () => { downInfo = null; endDrag(); });
+
+function complete() {
+  const pi = drag.pi;
+  paths[pi].done = true;
+  drag = null;
+  tone(SCALE[L.pairs[pi].c], 0, 0.4, 0.12);
+  updateCount();
+  dirty = true;
+  if (paths.every(p => p && p.done)) {
+    won = true;
+    maxLevel = Math.max(maxLevel, level + 1);
+    store.set({ level: level + 1, max: maxLevel, sound: soundOn });
+    $('next').disabled = false;
+    const sec = Math.round((performance.now() - t0) / 1000);
+    $('winText').textContent = `Level ${level} · ${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+    [0, 0.09, 0.18, 0.3].forEach((w, i) => tone([523.25, 659.25, 784, 1046.5][i], w + 0.15, 0.5, 0.1));
+    setTimeout(() => { $('win').hidden = false; $('nextBtn').focus({ preventScroll: true }); }, 450);
+  }
+}
+
+$('prev').onclick = () => load(level - 1);
+$('next').onclick = () => load(level + 1);
+$('nextBtn').onclick = () => load(level + 1);
+$('clear').onclick = () => { if (won) return; paths = paths.map(() => null); updateCount(); dirty = true; };
+function syncSound() { $('sound').textContent = soundOn ? 'Sound on' : 'Sound off'; $('sound').setAttribute('aria-pressed', soundOn); }
+$('sound').onclick = () => { soundOn = !soundOn; syncSound(); store.set({ level, max: maxLevel, sound: soundOn }); };
+syncSound();
+
+/* ---------- rendering ---------- */
+let k = 1; // device px per board unit
+let theme = {};
+function readTheme() {
+  const cs = getComputedStyle(document.documentElement);
+  theme = { frame: cs.getPropertyValue('--frame').trim(), stitch: cs.getPropertyValue('--stitch').trim(),
+            alert: cs.getPropertyValue('--alert').trim(), dim: parseFloat(cs.getPropertyValue('--cork-dim')) || 0 };
+  dirty = true;
+}
+readTheme();
+matchMedia('(prefers-color-scheme: dark)').addEventListener?.('change', readTheme);
+new MutationObserver(readTheme).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+const cork = document.createElement('canvas');
+(function makeCork() {
+  cork.width = cork.height = 1000;
+  const g = cork.getContext('2d'), rng = mulberry32(42);
+  g.fillStyle = '#c99a63'; g.fillRect(0, 0, 1000, 1000);
+  for (let i = 0; i < 260; i++) {
+    g.fillStyle = `rgba(${rng() < 0.5 ? '120,74,34' : '232,196,140'},${0.08 + rng() * 0.1})`;
+    g.beginPath(); g.ellipse(rng() * 1000, rng() * 1000, 10 + rng() * 40, 8 + rng() * 30, rng() * 3, 0, 7); g.fill();
+  }
+  for (let i = 0; i < 14000; i++) {
+    const dark = rng() < 0.6;
+    g.fillStyle = dark ? `rgba(92,52,20,${0.25 + rng() * 0.45})` : `rgba(245,214,160,${0.25 + rng() * 0.4})`;
+    g.beginPath(); g.ellipse(rng() * 1000, rng() * 1000, 0.8 + rng() * 2.6, 0.6 + rng() * 1.8, rng() * 3, 0, 7); g.fill();
+  }
+})();
+
+function resize() {
+  const r = $('stage').getBoundingClientRect();
+  const size = Math.max(200, Math.floor(Math.min(r.width, r.height)));
+  const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+  canvas.style.width = canvas.style.height = size + 'px';
+  canvas.width = canvas.height = Math.round(size * dpr);
+  k = canvas.width / 1000;
+  dirty = true;
+}
+new ResizeObserver(resize).observe($('stage'));
+
+function smooth(pts) {
+  ctx.beginPath();
+  ctx.moveTo(pts[0].x, pts[0].y);
+  if (pts.length < 3) { if (pts[1]) ctx.lineTo(pts[1].x, pts[1].y); return; }
+  for (let i = 1; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1];
+    ctx.quadraticCurveTo(a.x, a.y, (a.x + b.x) / 2, (a.y + b.y) / 2);
+  }
+  const last = pts[pts.length - 1];
+  ctx.lineTo(last.x, last.y);
+}
+function drawThread(pts, color, alpha = 1) {
+  if (pts.length < 2) return;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.lineCap = ctx.lineJoin = 'round';
+  smooth(pts);
+  ctx.shadowColor = 'rgba(30,15,0,.38)'; ctx.shadowBlur = 5 * k; ctx.shadowOffsetX = 2 * k; ctx.shadowOffsetY = 4 * k;
+  ctx.strokeStyle = color; ctx.lineWidth = LW; ctx.stroke();
+  ctx.shadowColor = 'transparent';
+  ctx.strokeStyle = 'rgba(0,0,0,.2)'; ctx.lineWidth = LW * 0.55; ctx.setLineDash([3, 6]); ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,255,255,.28)'; ctx.lineWidth = 2.4; ctx.setLineDash([5, 4]); ctx.lineDashOffset = 4; ctx.stroke();
+  ctx.restore();
+}
+function glyph(type, x, y, s, ink) {
+  ctx.save(); ctx.translate(x, y);
+  ctx.fillStyle = ink; ctx.strokeStyle = ink; ctx.lineWidth = 4; ctx.lineJoin = 'round';
+  ctx.beginPath();
+  switch (type) {
+    case 'dot': ctx.arc(0, 0, s * 0.62, 0, 7); ctx.fill(); break;
+    case 'square': ctx.rect(-s * 0.55, -s * 0.55, s * 1.1, s * 1.1); ctx.fill(); break;
+    case 'tri': ctx.moveTo(0, -s * 0.75); ctx.lineTo(s * 0.72, s * 0.55); ctx.lineTo(-s * 0.72, s * 0.55); ctx.closePath(); ctx.fill(); break;
+    case 'diamond': ctx.moveTo(0, -s * 0.8); ctx.lineTo(s * 0.62, 0); ctx.lineTo(0, s * 0.8); ctx.lineTo(-s * 0.62, 0); ctx.closePath(); ctx.fill(); break;
+    case 'star': for (let i = 0; i < 10; i++) { const r = i % 2 ? s * 0.38 : s * 0.85, a = -Math.PI / 2 + i * Math.PI / 5; ctx.lineTo(Math.cos(a) * r, Math.sin(a) * r); } ctx.closePath(); ctx.fill(); break;
+    case 'plus': ctx.rect(-s * 0.22, -s * 0.72, s * 0.44, s * 1.44); ctx.rect(-s * 0.72, -s * 0.22, s * 1.44, s * 0.44); ctx.fill(); break;
+    case 'ring': ctx.arc(0, 0, s * 0.55, 0, 7); ctx.lineWidth = 5; ctx.stroke(); break;
+    case 'hex': for (let i = 0; i < 6; i++) { const a = Math.PI / 3 * i; ctx.lineTo(Math.cos(a) * s * 0.7, Math.sin(a) * s * 0.7); } ctx.closePath(); ctx.fill(); break;
+  }
+  ctx.restore();
+}
+function drawPeg(p, i, now) {
+  const col = COLORS[p.c];
+  const done = paths[p.pair] && paths[p.pair].done;
+  if (drag && drag.target === i) {
+    const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const s = reduce ? 0.5 : 0.5 + 0.5 * Math.sin(now / 160);
+    ctx.beginPath(); ctx.arc(p.x, p.y, PEG_R + 8 + s * 8, 0, 7);
+    ctx.strokeStyle = col.c; ctx.globalAlpha = 0.35 + 0.35 * s; ctx.lineWidth = 5; ctx.stroke(); ctx.globalAlpha = 1;
+  }
+  ctx.save();
+  ctx.shadowColor = 'rgba(30,15,0,.45)'; ctx.shadowBlur = 8 * k; ctx.shadowOffsetX = 3 * k; ctx.shadowOffsetY = 6 * k;
+  ctx.beginPath(); ctx.arc(p.x, p.y, PEG_R, 0, 7); ctx.fillStyle = col.c; ctx.fill();
+  ctx.restore();
+  const gr = ctx.createRadialGradient(p.x - PEG_R * 0.35, p.y - PEG_R * 0.4, 2, p.x, p.y, PEG_R);
+  gr.addColorStop(0, 'rgba(255,255,255,.55)'); gr.addColorStop(0.45, 'rgba(255,255,255,0)'); gr.addColorStop(1, 'rgba(0,0,0,.22)');
+  ctx.beginPath(); ctx.arc(p.x, p.y, PEG_R, 0, 7); ctx.fillStyle = gr; ctx.fill();
+  if (done) { ctx.beginPath(); ctx.arc(p.x, p.y, PEG_R - 4, 0, 7); ctx.strokeStyle = 'rgba(255,255,255,.7)'; ctx.lineWidth = 3; ctx.stroke(); }
+  glyph(col.g, p.x, p.y, 17, col.ink);
+}
+function draw(now) {
+  ctx.setTransform(k, 0, 0, k, 0, 0);
+  ctx.clearRect(0, 0, 1000, 1000);
+  if (!L) return;
+  const S = L.shape;
+  // frame band
+  ctx.save();
+  ctx.shadowColor = 'rgba(0,0,0,.3)'; ctx.shadowBlur = 14 * k; ctx.shadowOffsetY = 6 * k;
+  pathShape(S, FRAME); ctx.fillStyle = theme.frame; ctx.fill();
+  ctx.restore();
+  pathShape(S, FRAME * 0.5);
+  ctx.save(); ctx.setLineDash([11, 8]); ctx.strokeStyle = theme.stitch; ctx.globalAlpha = 0.85; ctx.lineWidth = 3; ctx.stroke(); ctx.restore();
+  // cork
+  ctx.save();
+  pathShape(S, 0); ctx.clip();
+  ctx.drawImage(cork, 0, 0, 1000, 1000);
+  if (theme.dim) { ctx.fillStyle = `rgba(10,8,5,${theme.dim})`; ctx.fillRect(0, 0, 1000, 1000); }
+  pathShape(S, 0); ctx.strokeStyle = 'rgba(40,20,0,.35)'; ctx.lineWidth = 14; ctx.stroke();
+  ctx.restore();
+  // posts
+  for (const q of L.pillars) {
+    ctx.save();
+    ctx.shadowColor = 'rgba(30,15,0,.5)'; ctx.shadowBlur = 10 * k; ctx.shadowOffsetX = 4 * k; ctx.shadowOffsetY = 7 * k;
+    ctx.beginPath(); ctx.arc(q.x, q.y, q.r, 0, 7); ctx.fillStyle = '#7b4b28'; ctx.fill();
+    ctx.restore();
+    const g = ctx.createRadialGradient(q.x - q.r * .3, q.y - q.r * .3, 2, q.x, q.y, q.r);
+    g.addColorStop(0, '#c48a55'); g.addColorStop(1, '#6e4221');
+    ctx.beginPath(); ctx.arc(q.x, q.y, q.r * 0.86, 0, 7); ctx.fillStyle = g; ctx.fill();
+    ctx.strokeStyle = 'rgba(60,30,10,.35)'; ctx.lineWidth = 1.5;
+    for (let r = q.r * 0.25; r < q.r * 0.8; r += q.r * 0.18) { ctx.beginPath(); ctx.arc(q.x, q.y, r, 0, 7); ctx.stroke(); }
+  }
+  // threads
+  paths.forEach((p, i) => { if (p && p.done) drawThread(p.pts, COLORS[L.pairs[i].c].c); });
+  if (retract) {
+    const t = (now - retract.start) / 220;
+    if (t >= 1) retract = null;
+    else drawThread(retract.pts.slice(0, Math.max(2, Math.ceil(retract.pts.length * (1 - t)))), COLORS[retract.c].c, 1 - t * 0.6);
+  }
+  if (drag) {
+    drawThread(drag.pts, COLORS[L.pairs[drag.pi].c].c, 0.92);
+    if (drag.blocked) {
+      const tip = drag.pts[drag.pts.length - 1];
+      ctx.save();
+      ctx.setLineDash([6, 8]); ctx.lineCap = 'round'; ctx.strokeStyle = theme.alert; ctx.lineWidth = 4;
+      ctx.beginPath(); ctx.moveTo(tip.x, tip.y); ctx.lineTo(drag.ptr.x, drag.ptr.y); ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.beginPath(); ctx.arc(tip.x, tip.y, LW, 0, 7); ctx.lineWidth = 3; ctx.stroke();
+      ctx.restore();
+    }
+  }
+  // pins
+  L.pegs.forEach((p, i) => drawPeg(p, i, now));
+}
+function loop(now) {
+  if (dirty || drag || retract) { draw(now); dirty = false; }
+  requestAnimationFrame(loop);
+}
+
+/* ---------- boot ---------- */
+function start(data) {
+  const n = (data && data.level) || saved.level || 1;
+  load(Math.min(n, maxLevel));
+  resize();
+  requestAnimationFrame(loop);
+}
+window.claude?.hot?.snapshot?.(() => ({ level }));
+window.claude?.hot?.ready ? window.claude.hot.ready(start) : start(window.claude?.hot?.data ?? {});
+})();
+</script>
